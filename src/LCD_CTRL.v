@@ -12,298 +12,230 @@ module LCD_CTRL(clk,
                 done);
     input clk;
     input reset;
-    input [3:0] cmd;
-    input cmd_valid;
-    input [7:0] IROM_Q;
-    output IROM_rd;
-    output [5:0] IROM_A;
-    output IRAM_valid;
-    output [7:0] IRAM_D;
-    output [5:0] IRAM_A;
-    output busy;
-    output done;
-    
-    //parameter
-    parameter READ     = 2'd0;
-    parameter IDLE_CMD = 2'd1;
-    parameter OP       = 2'd2;
-    parameter WRITE    = 2'd3;
-    //
-    
-    //define reg or wire
-    reg [1:0]state_cs;
-    reg [1:0]state_ns;
-    reg [7:0] ImageBuffer[63:0];
-    reg [5:0]P0;
-    wire [5:0]P1,P2,P3;
-    reg [5:0] counter;
-    
-    
-    reg IROM_rd;
-    reg [5:0] IROM_A;
-    reg IRAM_valid;
-    reg [7:0] IRAM_D;
-    reg [5:0] IRAM_A;
-    reg busy;
-    reg done;
-    reg [5:0] cmpMax,cmpMin;
-    reg [9:0]sum;
-    //
-    
-    //state switch
-    always@(posedge clk or posedge reset)
-    begin
-        if (reset) state_cs <= READ;
-        else state_cs <= state_ns;
-    end
-    //
-    
-    //next state logic
-    always@(*)
-    begin
-        case(state_cs)
-            READ:
-            begin
-                if (IROM_A == 6'd63) state_ns = IDLE_CMD;
-                else state_ns = READ;
-            end
-            IDLE_CMD:
-            begin
-                if (cmd_valid && cmd != 4'd0) state_ns = OP;
-                else if (cmd_valid && cmd == 4'd0) state_ns = WRITE;
-                else state_ns = IDLE_CMD;
-            end
-            OP:
-            begin
-                state_ns = IDLE_CMD;
-            end
-            WRITE:
-            begin
-                state_ns = WRITE;
-            end
-        endcase
-    end
-    //
-    
-    //logic
-    assign P1 = P0 +6'd1;
-    assign P2 = P0 +6'd8;
-    assign P3 = P0 +6'd9;
-    //
-    
-    //control singal
-    always@(*)
-    begin
-        case(state_cs)
-            READ:
-            begin
-                IROM_rd    = 1'd1;
-                IRAM_valid = 1'd0;
-                busy       = 1'd1;
-            end
-            IDLE_CMD:
-            begin
-                IROM_rd    = 1'd0;
-                IRAM_valid = 1'd0;
-                busy       = 1'd0;
-            end
-            OP:
-            begin
-                IROM_rd    = 1'd0;
-                IRAM_valid = 1'd0;
-                busy       = 1'd1;
-            end
-            WRITE:
-            begin
-                IROM_rd    = 1'd0;
-                IRAM_valid = 1'd1;
-                busy       = 1'd1;
-            end
-        endcase
-    end
-    //
-    
-    //IROM_A counter
-    always@(posedge clk)
-    begin
-        if (reset == 1'd1) IROM_A <= 6'd0;
-        else if (IROM_rd == 1'd1)
-        begin
-        if (IROM_A == 6'd63) IROM_A <= 6'd0;
-        else IROM_A <= IROM_A +6'd1;
-    end
-    end
-    //
-    
-    //IRAM_A counter
-    always@(posedge clk)
-    begin
-        if (reset == 1'd1) counter <= 6'd0;
-        else if (IRAM_valid == 1'd1)
-        begin
-        if (counter == 6'd63) counter <= counter;
-        else counter <= counter +6'd1;
-    end
-    end
-    //
-    
-    //IRAM_A delay 1 clk
-    always@(posedge clk)
-    begin
-        IRAM_A <= counter;
-    end
-    //
-    
-    //point move
-    always@(posedge clk)
-    begin
-        if (reset == 1'd1) P0 <= 6'h1b; //6'd27
-        else
-        begin
-        if (state_cs == IDLE_CMD)
-        begin
-            case(cmd)
-                4'd1: //shift_up
-                begin
-                    if (P0 > 6'd7) P0 <= P0 - 6'd8;
-                    else P0           <= P0;
-                end
-                4'd2: //shift_down
-                begin
-                    if (P0<6'h30) P0 <= P0 +6'd8;
-                    else P0          <= P0;
-                end
-                4'd3: //shift_left
-                begin
-                    if (P0 == 6'h0 || P0 == 6'h8 || P0 == 6'h10 || P0 == 6'h18 || P0 == 6'h20 || P0 == 6'h28 || P0 == 6'h30 || P0 == 6'h38) P0 <= P0;
-                    else P0 <= P0 - 6'd1;
-                end
-                4'd4: //shift_right
-                begin
-                    if (P0 == 6'h6 || P0 == 6'he || P0 == 6'h16 || P0 == 6'h1e || P0 == 6'h26 || P0 == 6'h2e || P0 == 6'h36 || P0 == 6'h3e) P0 <= P0;
-                    else P0 <= P0 +6'd1;
-                end
-            endcase
+    input [3:0] cmd; //(cmd_valid&(~busy)) 允許存取
+    input cmd_valid; //(!cmd_valid) 不允許存取CMD 反之允許
+    input [7:0] IROM_Q; //8bits灰階值
+//-----------read ROM
+    output reg IROM_rd;// (IROM_rd)  read IROM_A的位址後，由IROM_Q傳送回傳此位址的8bits灰階值，反之不動作
+    output reg [5:0] IROM_A; //IROM的位址 64bits灰階
+    output reg busy; // (IROM_rd) or (CMD) busy也跟著為(busy)，結束為(!busy) 
+//------------
+//------------write RAM
+    output reg IRAM_valid; //(IRAM_valid)  IRAM_D 為8bits灰階值，IRAM_A 為儲存位址，反之停止傳送  
+    output reg [7:0] IRAM_D; //存放運算後的值
+    output reg [5:0] IRAM_A; //存放運算後的值的位址
+//------------finish 
+    output reg done; //與(busy)相反。
+//------------ 
+parameter [3:0] Write = 4'd0,
+                Shift_Up = 4'd1,
+                Shift_Down = 4'd2,
+                Shift_Left = 4'd3,
+                Shift_Right = 4'd4,
+                Max = 4'd5,
+                Min = 4'd6,
+                Average = 4'd7,
+                Counterclockwise_Rotation = 4'd8,
+                Clockwise_Rotation = 4'd9,
+                Mirror_X = 4'd10,
+                Mirror_Y = 4'd11;
+parameter   [5:0]IDLE = 6'd0,
+                 READ = 6'd1,
+                 CMD = 6'd2,
+                 OPERATE = 6'd3,
+                 WRITE = 6'd4,
+                 DONE = 6'd5;
+reg[5:0]write_cnt;
+reg [5:0]cs,ns;
+reg[7:0]pixel[63:0];
+reg[7:0]ax_x,ax_y;
+
+wire [7:0]  left_up,//cnt - 6'd9 左上
+            right_up,//cnt - 6'd8 右上
+            left_down,//cnt - 6'd1 左下
+            right_down;//cnt        右下
+
+//flagging at Right UP side
+// point assignment
+// hint '+' operator's priority is greater than '>> or <<'
+assign left_up =( (ax_y-8'd1)<<8'd3 ) + (ax_x - 8'd1);
+assign right_up =( (ax_y-8'd1)<<8'd3 )+ ax_x;
+assign left_down =( (ax_y-8'd1)<<8'd3 ) + (ax_x + 8'd7);
+assign right_down =( (ax_y-8'd1)<<8'd3 )+ (ax_x + 8'd8);
+//max compare
+wire [7:0] max_temp[1:0];
+wire [7:0] max;
+assign max_temp[0] = (pixel[left_up] >= pixel[left_down])? pixel[left_up]: pixel[left_down];
+assign max_temp[1] = (pixel[right_up] >= pixel[right_down])? pixel[right_up]: pixel[right_down];
+assign max = (max_temp[0] >= max_temp[1])? max_temp[0]: max_temp[1];
+
+//min compare
+wire [7:0] min_temp[1:0];
+wire [7:0] min;
+assign min_temp[0] = (pixel[left_up] <= pixel[left_down])? pixel[left_up]: pixel[left_down];
+assign min_temp[1] = (pixel[right_up] <= pixel[right_down])? pixel[right_up]: pixel[right_down];
+assign min = (min_temp[0] <= min_temp[1])? min_temp[0]: min_temp[1];
+
+
+//avg two ?bit adder must more 1bit register store
+wire [9:0] sum;
+wire [7:0] avg;
+assign sum = (pixel[left_up] + pixel[right_up]) + (pixel[left_down] + pixel[right_down]);
+assign avg = sum>>2;
+
+//top reset
+  
+/*write 64bit count
+always@(posedge clk) begin
+    if(reset) begin
+        write_cnt <= 6'd0;
+    end 
+    else if (cs[WRITE]) begin
+        if (write_cnt != 6'h3f)begin
+        write_cnt = write_cnt + 1'b1;
+        end
+        else begin
+        write_cnt = 6'd0;
         end
     end
+end*/
+//CS 
+always@(posedge clk or posedge reset)begin
+    if (reset)begin
+        cs <= 6'h0;
+        cs[IDLE] <= 1'b1;
+    end 
+    else 
+        cs <= ns ;
+end
+
+//FSM
+
+always@(*) begin
+    ns = 6'b0;
+    case (1'b1)
+            cs[IDLE]:   ns[READ] = 1'b1;
+            cs[READ]:   if (IROM_A == 6'h3f) ns[CMD] = 1'b1 ; else ns[READ] = 1'b1;
+            cs[CMD]:    if(cmd == 4'd0) ns[WRITE] = 1'b1;  else if(cmd_valid == 1'b1) ns[OPERATE] = 1'b1;
+                                    else ns[CMD] = 1'b1;
+            cs[OPERATE]: ns[CMD] = 1'b1;
+            cs[WRITE]:  if (IRAM_A == 6'h3f) ns[DONE] = 1'b1; else ns[WRITE] = 1'b1;
+            cs[DONE]:   if (done) ns[IDLE] = 1'b1;
+    endcase
+end
+
+always@(posedge clk or posedge reset)begin
+    if  (reset)begin
+        busy       <= 1'b1;
+        done       <= 1'b0;
+        IROM_rd    <= 1'b0;
+        IROM_A     <= 6'b0;
+        IRAM_D     <= 8'b0; 
+        IRAM_A     <= 6'b0;
+        IRAM_valid <= 1'b0;
+        ax_x <= 6'd4;
+        ax_y <= 6'd4;
+        write_cnt <= 6'd0;
     end
-    //
-    
-    //comparetor
-    always@(*) //max
-    begin
-        
-        if (ImageBuffer[P0] >= ImageBuffer[P1] && ImageBuffer[P0] >= ImageBuffer[P2] && ImageBuffer[P0] >= ImageBuffer[P3]) cmpMax = P0; //Max      = P0
-        else if (ImageBuffer[P1] >= ImageBuffer[P0] && ImageBuffer[P1] >= ImageBuffer[P2] && ImageBuffer[P1] >= ImageBuffer[P3]) cmpMax = P1;
-        else if (ImageBuffer[P2] >= ImageBuffer[P0] && ImageBuffer[P2] >= ImageBuffer[P1] && ImageBuffer[P2] >= ImageBuffer[P3]) cmpMax = P2;
-        else cmpMax = P3;
-        
-        
-    end
-    
-    always@(*) //min
-    begin
-        
-        if (ImageBuffer[P0] <= ImageBuffer[P1] && ImageBuffer[P0] <= ImageBuffer[P2] && ImageBuffer[P0] <= ImageBuffer[P3]) cmpMin = P0; //Max      = P0
-        else if (ImageBuffer[P1] <= ImageBuffer[P0] && ImageBuffer[P1] <= ImageBuffer[P2] && ImageBuffer[P1] <= ImageBuffer[P3]) cmpMin = P1;
-        else if (ImageBuffer[P2] <= ImageBuffer[P0] && ImageBuffer[P2] <= ImageBuffer[P1] && ImageBuffer[P2] <= ImageBuffer[P3]) cmpMin = P2;
-        else cmpMin = P3;
-        
-    end
-    //
-    
-    //sum
-    always@(*)
-    begin
-        sum = ImageBuffer[P0] + ImageBuffer[P1] + ImageBuffer[P2] + ImageBuffer[P3];
-    end
-    //
-    
-    
-    //output logic
-    always@(posedge clk)
-    begin
-        case(state_cs)
-            READ:
-            begin
-                if (IROM_rd == 1'd1) ImageBuffer[IROM_A] <= IROM_Q;
-            end
-            IDLE_CMD:
-            begin
-                case(cmd)
-                    4'd5: //max
-                    begin
-                        ImageBuffer[P0] <= ImageBuffer[cmpMax];
-                        ImageBuffer[P1] <= ImageBuffer[cmpMax];
-                        ImageBuffer[P2] <= ImageBuffer[cmpMax];
-                        ImageBuffer[P3] <= ImageBuffer[cmpMax];
-                    end
-                    4'd6: //min
-                    begin
-                        ImageBuffer[P0] <= ImageBuffer[cmpMin];
-                        ImageBuffer[P1] <= ImageBuffer[cmpMin];
-                        ImageBuffer[P2] <= ImageBuffer[cmpMin];
-                        ImageBuffer[P3] <= ImageBuffer[cmpMin];
-                    end
-                    4'd7: //average
-                    begin
-                        ImageBuffer[P0] <= sum[9:2];
-                        ImageBuffer[P1] <= sum[9:2];
-                        ImageBuffer[P2] <= sum[9:2];
-                        ImageBuffer[P3] <= sum[9:2];
-                    end
-                    4'd8: //Counterclockwise Rotation
-                    begin
-                        ImageBuffer[P0] <= ImageBuffer[P1];
-                        ImageBuffer[P1] <= ImageBuffer[P3];
-                        ImageBuffer[P2] <= ImageBuffer[P0];
-                        ImageBuffer[P3] <= ImageBuffer[P2];
-                    end
-                    4'd9: //Clockwise Rotation
-                    begin
-                        ImageBuffer[P0] <= ImageBuffer[P2];
-                        ImageBuffer[P1] <= ImageBuffer[P0];
-                        ImageBuffer[P2] <= ImageBuffer[P3];
-                        ImageBuffer[P3] <= ImageBuffer[P1];
-                    end
-                    4'd10: //mirror X
-                    begin
-                        ImageBuffer[P0] <= ImageBuffer[P2];
-                        ImageBuffer[P1] <= ImageBuffer[P3];
-                        ImageBuffer[P2] <= ImageBuffer[P0];
-                        ImageBuffer[P3] <= ImageBuffer[P1];
-                    end
-                    4'd11: //mirror y
-                    begin
-                        ImageBuffer[P0] <= ImageBuffer[P1];
-                        ImageBuffer[P1] <= ImageBuffer[P0];
-                        ImageBuffer[P2] <= ImageBuffer[P3];
-                        ImageBuffer[P3] <= ImageBuffer[P2];
-                    end
-                endcase
-            end
-            OP:
-            begin
-                
-            end
-            WRITE:
-            begin
-                if (IRAM_valid == 1'd1) IRAM_D <= ImageBuffer[counter];
-            end
+    else begin
+            case (1'b1)
+                cs[IDLE]:   begin
+                                IROM_rd <= 1'b1;
+                                busy <= 1'b1;
+                            end
+                cs[READ]:   begin
+                                IROM_A <= IROM_A + 1'b1;
+                                pixel[IROM_A] <= IROM_Q;
+                                if  (IRAM_A == 6'h3f) busy <= 1'b0;
+                            end
+                cs[CMD]:    begin
+                                busy <= 1'b0;
+                                case (cmd)
+                                Write:  begin 
+                                        end
+                                Shift_Up:  begin
+                                                if(ax_y == 6'd1) ax_y <= 6'd1;
+                                                else ax_y <= ax_y - 1'b1;
+                                            end
+                                Shift_Down:begin
+                                                if(ax_y == 6'd7) ax_y <= 6'd7;
+                                                else ax_y <= ax_y + 1'b1;
+                                            end
+                                Shift_Left:begin
+                                                if(ax_x == 6'd1) ax_x <= 6'd1;
+                                                else ax_x <= ax_x - 1'b1;
+                                            end
+                                Shift_Right:begin
+                                                if(ax_x == 6'd7) ax_x <= 6'd7;
+                                                else ax_x <= ax_x + 1'b1;
+                                            end
+                                Max:        begin
+                                                pixel[left_up] <= max;
+                                                pixel[left_down] <= max;
+                                                pixel[right_up] <= max;
+                                                pixel[right_down] <= max;
+                                            end
+                                Min:        begin
+                                                pixel[left_up] <= min;
+                                                pixel[left_down] <= min;
+                                                pixel[right_up] <= min;
+                                                pixel[right_down] <= min;
+                                            end
+                                Average:    begin
+                                                pixel[left_up] <= avg;
+                                                pixel[left_down] <= avg;
+                                                pixel[right_up] <= avg;
+                                                pixel[right_down] <= avg;
+                                            end
+                Counterclockwise_Rotation:  begin
+                                                pixel[left_up] <= pixel[right_up];
+                                                pixel[left_down] <= pixel[left_up];
+                                                pixel[right_down] <= pixel[left_down];
+                                                pixel[right_up] <= pixel[right_down];
+                                            end
+                    Clockwise_Rotation:   begin
+                                                pixel[right_up] <= pixel[left_up];
+                                                pixel[right_down] <= pixel[right_up];
+                                                pixel[left_down] <= pixel[right_down];
+                                                pixel[left_up] <= pixel[left_down];
+                                            end
+                                Mirror_X:   begin
+                                                pixel[left_down] <= pixel[left_up];
+                                                pixel[right_down] <= pixel[right_up];
+                                                pixel[left_up] <= pixel[left_down];
+                                                pixel[right_up] <= pixel[right_down];
+                                            end
+                                Mirror_Y:   begin
+                                                pixel[right_up] <= pixel[left_up];
+                                                pixel[left_up] <= pixel[right_up];
+                                                pixel[left_down] <= pixel[right_down];
+                                                pixel[right_down] <= pixel[left_down];
+                                            end
+                                default:begin end
+                                endcase
+                            end
+                cs[OPERATE]:begin
+                            busy <= 1'b1 ;
+                            end
+                cs[WRITE]:  begin
+                            IRAM_valid <= 1'b1;
+                            busy <= 1'b1;
+                            if (IRAM_valid == 1'b1) begin
+                                IRAM_A <= write_cnt;
+                                IRAM_D <= pixel[write_cnt];
+                                write_cnt <= write_cnt + 1'b1;
+                            end
+                            end
+                cs[DONE]:   begin
+                            busy <= 1'b0;
+                            done <= 1'b1;
+                            write_cnt <= 6'd0;
+                            end
+            default:begin end
         endcase
     end
-    //
-    
-    //singal done
-    always @(posedge clk)
-    begin
-        if (IRAM_A == 6'd63) done <= 1'd1;
-        else done <= 1'd0;
-    end
-    //
-    
-    
-    
+end
+//
 endmodule
     
     

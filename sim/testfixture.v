@@ -7,19 +7,19 @@
 `ifdef tb1
   `define EXPECT "./tb1_goal.dat"
   `define CMD "./cmd1.dat"
-  `define IMAGE "image1.dat"
+  `define IMAGE "./image1.dat"
 `endif
 
 `ifdef tb2
   `define EXPECT "./tb2_goal.dat"
   `define CMD "./cmd2.dat"
-  `define IMAGE "image2.dat"
+  `define IMAGE "./image2.dat"
 `endif
 
 `ifdef tb3
   `define EXPECT "./tb3_goal.dat"
   `define CMD "./cmd3.dat"
-  `define IMAGE "image3.dat"
+  `define IMAGE "./image3.dat"
 `endif
 
 
@@ -156,6 +156,7 @@ end
 	
 	end
 end
+
 
 endmodule
 

@@ -1,0 +1,9 @@
+//
+// File created by:  ncverilog
+// Do not modify this file
+//
+testfixture.v
+../src/LCD_CTRL.v
+tsmc13_neg.v
++define+tb3
++access+
